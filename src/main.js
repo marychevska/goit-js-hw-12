@@ -1,129 +1,127 @@
-import iziToast from "izitoast";
-import "izitoast/dist/css/iziToast.min.css";
-import 'loaders.css/loaders.min.css';
+import iziToast from 'izitoast';
+import 'izitoast/dist/css/iziToast.min.css';
 
-// Імпорт функцій з файлів
-import { responseData, resetPage } from './js/pixabay-api';
-import { renderImages, clearGallery, refreshLightbox } from './js/render-functions';
-// Імпорт іконки
-import iconSvgError from './img/Group.png';
+import iconError from './img/error.svg';
+import getImagesByQuery from './js/pixabay-api';
+import {
+  createGallery,
+  clearGallery,
+  showLoader,
+  hideLoader,
+  showLoadMoreButton,
+  hideLoadMoreButton,
+} from './js/render-functions';
 
-// Елементи DOM
+document.querySelector('.span').classList.remove('loader');
+
 const form = document.querySelector('.form');
-const loaderElement = document.querySelector('.loader');
-const gallery = document.querySelector('.gallery');
-const loadMoreBtn = document.querySelector('.load-more');
+const loadMoreBtn = document.querySelector('.btn.visually-hidden');
 
-// Налаштування повідомлень
-const errorMesage = {
-  message: 'Sorry, there are no images matching your search query. Please try again!',
-  messageColor: '#fff',
-  backgroundColor: '#ef4040',
-  position: 'topRight',
-  iconUrl: iconSvgError,
+let page = 1;
+let query;
+let maxPages;
+
+const errorMessage = {
+  message:
+    'Sorry, there are no images matching your search query. Please try again!',
+  messageColor: '#ffffff',
+  iconUrl: iconError,
+  iconColor: '#ffffff',
+  backgroundColor: '#B51B1B',
 };
 
-const endMessage = {
-  message: "We're sorry, but you've reached the end of search results.",
-  messageColor: '#fff',
-  backgroundColor: '#ef4040',
-  position: 'topRight',
-  iconUrl: iconSvgError,
+const errorServerConnection = {
+  title: 'ERROR',
+  titleColor: '#ffffff',
+  message: 'Error connecting to server',
+  messageColor: '#ffffff',
+  iconUrl: iconError,
+  iconColor: '#ffffff',
+  backgroundColor: '#B51B1B',
 };
 
-// Змінні для пошуку
-let totalHits = 0;
-let loadedImages = 0;
-let query = '';
+form.addEventListener('submit', handleSubmit);
+loadMoreBtn.addEventListener('click', onLoadMore);
 
-// Слухачі подій
-form.addEventListener('submit', searchImages);
-loadMoreBtn.addEventListener('click', loadMoreImages);
-
-// Функція для пошуку зображень
-async function searchImages(event) {
+function handleSubmit(event) {
   event.preventDefault();
-  
-  // Отримуємо текст запиту
-  query = event.currentTarget.elements.searchQuery.value.trim();
-  if (!query) {
+
+  hideLoadMoreButton();
+  clearGallery();
+  page = 1;
+
+  query = event.target.elements.text.value.trim();
+
+  if (!query || query === ' ') {
+    iziToast.show(errorMessage);
+    form.reset();
     return;
   }
 
-  loaderElement.classList.remove('visually-hidden');
-  clearGallery();
-  form.reset();
-  resetPage();
+  showLoader();
 
-  loadedImages = 0; // Скидаємо лічильник завантажених зображень
+  getImagesByQuery(query, page)
+    .then(response => {
+      const array = response.data.hits;
+      maxPages = Math.ceil(response.data.totalHits / array.length);
 
-  try {
-    const data = await responseData(query);
-    if (!data || !data.hits || data.hits.length === 0) {
-      iziToast.show(errorMesage);
-      loadMoreBtn.classList.add('visually-hidden');
-      return;
-    }
+      if (!array.length) {
+        noData();
+        return;
+      }
+      hideLoader();
+      createGallery(array);
 
-    const images = data.hits;
-    totalHits = data.totalHits;
-    loadedImages = images.length;
-
-    renderImages(images);
-    refreshLightbox();
-    toggleLoadMoreButton(loadedImages, totalHits);
-  } catch (error) {
-    iziToast.show({
-      ...errorMesage,
-      message: `An error occurred: ${error.message}`,
+      if (page < maxPages) {
+        showLoadMoreButton();
+      }
+    })
+    .catch(error => {
+      console.log(error.message);
+      hideLoader();
+      iziToast.show(errorServerConnection);
     });
-  } finally {
-    loaderElement.classList.add('visually-hidden');
-  }
+
+  form.reset();
 }
 
-// Функція для завантаження додаткових зображень
-async function loadMoreImages() {
-  loaderElement.classList.remove('visually-hidden');
-  const galleryHeightBefore = gallery.scrollHeight;
+function noData() {
+  iziToast.show(errorMessage);
+  clearGallery();
+  hideLoader();
+}
+
+async function onLoadMore() {
+  hideLoadMoreButton();
+  showLoader();
+  page++;
 
   try {
-    const data = await responseData(query);
-    if (!data || !data.hits || data.hits.length === 0) {
-      iziToast.show(errorMesage);
-      loadMoreBtn.classList.add('visually-hidden');
-      return;
-    }
+    const response = await getImagesByQuery(query, page);
 
-    const images = data.hits;
-    loadedImages += images.length;
+    createGallery(response.data.hits);
+    hideLoader();
 
-    renderImages(images);
-    refreshLightbox();
+    const card = document.querySelector('.gallery-item');
+    const cardHeight = card.getBoundingClientRect().height;
 
-    const galleryHeightAfter = gallery.scrollHeight;
     window.scrollBy({
-      top: galleryHeightAfter - galleryHeightBefore,
+      left: 0,
+      top: cardHeight * 2,
       behavior: 'smooth',
     });
 
-    toggleLoadMoreButton(loadedImages, totalHits);
-  } catch (error) {
-    iziToast.show({
-      ...errorMesage,
-      message: `An error occurred: ${error.message}`,
-    });
-  } finally {
-    loaderElement.classList.add('visually-hidden');
-  }
-}
+    if (page >= maxPages) {
+      errorMessage.message =
+        "We're sorry, but you've reached the end of search results.";
+      iziToast.show(errorMessage);
+      hideLoader();
+      return;
+    }
 
-// Функція для увімкнення/вимкнення кнопки "Load More"
-function toggleLoadMoreButton(loaded, total) {
-  if (loaded >= total) {
-    iziToast.show(endMessage);
-    loadMoreBtn.classList.add('visually-hidden');
-  } else {
-    loadMoreBtn.classList.remove('visually-hidden');
+    showLoadMoreButton();
+  } catch (error) {
+    alert(error.message);
+    hideLoader();
   }
 }
